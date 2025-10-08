@@ -117,8 +117,14 @@ const fmt = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency:
 function computeSurfaces({ length, width, height, doorWidth = 0.9, doorHeight = 2.05 }) {
   const areaFloor = length * width; // m²
   const perimeter = 2 * (length + width);
-  const wallArea = perimeter * height - doorWidth * doorHeight; // m², simplifié
-  return { areaFloor, wallArea };
+  const maxDoorWidth = Math.max(length, width);
+  const safeDoorWidth = Math.max(0, Math.min(maxDoorWidth, Number.isFinite(doorWidth) ? doorWidth : 0));
+  const safeDoorHeight = Math.max(0, Math.min(height, Number.isFinite(doorHeight) ? doorHeight : 0));
+  const rawDoorArea = safeDoorWidth > 0 && safeDoorHeight > 0 ? safeDoorWidth * safeDoorHeight : 0;
+  const maxDoorArea = perimeter * height;
+  const doorArea = Math.min(rawDoorArea, maxDoorArea);
+  const wallArea = Math.max(0, perimeter * height - doorArea); // m², simplifié
+  return { areaFloor, wallArea, doorArea, door: { width: safeDoorWidth, height: safeDoorHeight } };
 }
 
 function download(filename, content) {
@@ -382,6 +388,9 @@ export default function App() {
   const [length, setLength] = useState(3.0);
   const [width, setWidth] = useState(2.4);
   const [height, setHeight] = useState(2.5);
+  const [includeDoor, setIncludeDoor] = useState(true);
+  const [doorWidth, setDoorWidth] = useState(0.9);
+  const [doorHeight, setDoorHeight] = useState(2.05);
 
   // Identité & génération PDF
   const [companyName, setCompanyName] = useState("Cosmos Rénovation");
@@ -397,10 +406,22 @@ export default function App() {
   const floor = useMemo(() => CATALOG.sols.find((p) => p.sku === floorSku), [floorSku]);
   const wall = useMemo(() => CATALOG.murs.find((p) => p.sku === wallSku), [wallSku]);
 
-  const { areaFloor, wallArea } = useMemo(
-    () => computeSurfaces({ length, width, height }),
-    [length, width, height]
+  const { areaFloor, wallArea, doorArea, door } = useMemo(
+    () =>
+      computeSurfaces({
+        length,
+        width,
+        height,
+        doorWidth: includeDoor ? doorWidth : 0,
+        doorHeight: includeDoor ? doorHeight : 0,
+      }),
+    [length, width, height, doorWidth, doorHeight, includeDoor]
   );
+  const effectiveDoorWidth = door.width;
+  const effectiveDoorHeight = door.height;
+  const doorSummaryText = includeDoor
+    ? `${doorArea.toFixed(2)} m² (${effectiveDoorWidth.toFixed(2)} m × ${effectiveDoorHeight.toFixed(2)} m)`
+    : "Aucune";
 
   // Lignes de devis (matériaux)
   const materialLines = useMemo(() => {
@@ -469,7 +490,19 @@ export default function App() {
         clientNote: "Devis indicatif basé sur les sélections du configurateur. Sous réserve de métrés et visite technique.",
       },
       entreprise: { name: companyName, details: companyDetails },
-      piece: { length, width, height, surfaces: { sol_m2: +areaFloor.toFixed(2), murs_m2: +wallArea.toFixed(2) } },
+      piece: {
+        length,
+        width,
+        height,
+        surfaces: {
+          sol_m2: +areaFloor.toFixed(2),
+          murs_m2: +wallArea.toFixed(2),
+          porte_m2: includeDoor ? +doorArea.toFixed(2) : 0,
+        },
+        ouverture_porte: includeDoor
+          ? { largeur_m: +effectiveDoorWidth.toFixed(2), hauteur_m: +effectiveDoorHeight.toFixed(2) }
+          : null,
+      },
       lignes: allLines.map((l) => ({ ...l, total: +(l.qty * l.unitPrice).toFixed(2) })),
       totaux: { totalHT: +totalHT.toFixed(2), tvaRate, totalTVA: +totalTVA.toFixed(2), totalTTC: +totalTTC.toFixed(2) },
       conditions,
@@ -496,7 +529,8 @@ export default function App() {
     // Infos pièce
     doc.setFontSize(12);
     doc.text(`Pièce: L ${length} m × l ${width} m × h ${height} m`, margin, 140);
-    doc.text(`Surfaces: sol ${areaFloor.toFixed(2)} m² – murs ${wallArea.toFixed(2)} m²`, margin, 160);
+    const doorText = includeDoor ? ` – porte ${doorArea.toFixed(2)} m²` : "";
+    doc.text(`Surfaces: sol ${areaFloor.toFixed(2)} m² – murs ${wallArea.toFixed(2)} m²${doorText}`, margin, 160);
 
     // Tableau lignes
     const rows = allLines.map((l) => [
@@ -553,10 +587,46 @@ export default function App() {
       got: +s.areaFloor.toFixed(3),
     });
     out.push({
-      name: "Surface murs (hors porte)",
+      name: "Surface murs (porte déduite)",
       passed: approxEq(s.wallArea, 25.155, 0.02),
       expected: 25.155,
       got: +s.wallArea.toFixed(3),
+    });
+    out.push({
+      name: "Surface porte par défaut",
+      passed: approxEq(s.doorArea, 1.845, 0.02),
+      expected: 1.845,
+      got: +s.doorArea.toFixed(3),
+    });
+    out.push({
+      name: "Dimensions porte sécurisées",
+      passed: approxEq(s.door.width, 0.9, 0.001) && approxEq(s.door.height, 2.05, 0.001),
+      expected: "0.90 m × 2.05 m",
+      got: `${s.door.width.toFixed(2)} m × ${s.door.height.toFixed(2)} m`,
+    });
+
+    const sNoDoor = computeSurfaces({ length: 3.0, width: 2.4, height: 2.5, doorWidth: 0, doorHeight: 0 });
+    out.push({
+      name: "Surface murs sans porte",
+      passed: approxEq(sNoDoor.wallArea, 27.0, 0.02),
+      expected: 27.0,
+      got: +sNoDoor.wallArea.toFixed(3),
+    });
+    const sOversizedDoor = computeSurfaces({
+      length: 3.0,
+      width: 2.4,
+      height: 2.5,
+      doorWidth: 9,
+      doorHeight: 4,
+    });
+    out.push({
+      name: "Porte surdimensionnée limitée",
+      passed:
+        approxEq(sOversizedDoor.door.width, 3.0, 0.001) &&
+        approxEq(sOversizedDoor.door.height, 2.5, 0.001) &&
+        approxEq(sOversizedDoor.doorArea, 7.5, 0.02),
+      expected: "3.00 m × 2.50 m (7.50 m²)",
+      got: `${sOversizedDoor.door.width.toFixed(2)} m × ${sOversizedDoor.door.height.toFixed(2)} m (${sOversizedDoor.doorArea.toFixed(2)} m²)`,
     });
 
     // Test 2: quantités matériaux avec pertes, arrondies à 2 décimales
@@ -664,10 +734,44 @@ export default function App() {
               <Field label="Hauteur">
                 <NumberInput value={height} onChange={setHeight} />
               </Field>
+              <label className="col-span-2 flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={includeDoor}
+                  onChange={(e) => setIncludeDoor(e.target.checked)}
+                />
+                <span>Déduire une ouverture de porte</span>
+              </label>
+              {includeDoor && (
+                <>
+                  <Field label="Largeur porte (m)">
+                    <NumberInput
+                      value={doorWidth}
+                      onChange={setDoorWidth}
+                      min={0}
+                      max={Math.max(length, width)}
+                      step={0.05}
+                    />
+                  </Field>
+                  <Field label="Hauteur porte (m)">
+                    <NumberInput
+                      value={doorHeight}
+                      onChange={setDoorHeight}
+                      min={0}
+                      max={height}
+                      step={0.05}
+                    />
+                  </Field>
+                </>
+              )}
             </div>
             <div className="mt-3 text-sm text-gray-600">
               <div>Surface sol: <strong>{areaFloor.toFixed(2)} m²</strong></div>
               <div>Surface murs (net): <strong>{wallArea.toFixed(2)} m²</strong></div>
+              <div>
+                Ouverture porte déduite:
+                <strong className="ml-1">{doorSummaryText}</strong>
+              </div>
             </div>
           </Section>
 
