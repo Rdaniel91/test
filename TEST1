@@ -1,0 +1,764 @@
+import React, { useMemo, useState } from "react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable"; // v3 compatible: autoTable(doc, options)
+
+/**
+ * MVP – Configurateur de pièce
+ * Objectif: Visualiser rapidement une pièce en 2D stylisée, choisir des matériaux/meubles
+ * depuis un catalogue maîtrisé, calculer un devis transparent et exportable (JSON/PDF).
+ *
+ * Design system: Tailwind CSS (fourni par l'environnement canvas)
+ */
+
+// --- Catalogue produits (exemples) -----------------------------------------------------------
+// NOTE: Dans le produit final, ces données viendront d'une API interne (ex: /api/catalogue)
+// Chaque produit est référencé (sku) pour simplifier l'intégration ERP/CRM et la génération de devis.
+const CATALOG = {
+  sols: [
+    {
+      sku: "SOL-GRES-3060-ANTHRACITE",
+      label: "Grès cérame 30x60 anthracite (m²)",
+      unit: "m2",
+      price: 32.9,
+      wastage: 0.08, // marge de coupe/perte 8%
+      preview: { type: "tile", baseColor: "#3b3b3b", jointColor: "#9ca3af" },
+    },
+    {
+      sku: "SOL-PARQUET-ROUGE-XL",
+      label: "Parquet stratifié chêne rouge XL (m²)",
+      unit: "m2",
+      price: 41.5,
+      wastage: 0.06,
+      preview: { type: "plank", baseColor: "#8b5e34" },
+    },
+    {
+      sku: "SOL-GRES-LIMESTONE-6060-SAND",
+      label: "Grès cérame imitation pierre Limestone sand 60x60 (m²)",
+      unit: "m2",
+      price: 39.9,
+      wastage: 0.07,
+      preview: {
+        type: "texture",
+        textureDataUrl:
+          "data:image/jpeg;base64,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",
+        repeatSizePx: 60,
+        jointColor: "#d1d5db",
+      },
+    },
+  ],
+  murs: [
+    {
+      sku: "MUR-PEINTURE-BLANC-MAT",
+      label: "Peinture blanc mat (m²)",
+      unit: "m2",
+      price: 6.2,
+      wastage: 0.05,
+      preview: { type: "solid", baseColor: "#ffffff" },
+    },
+    {
+      sku: "MUR-FAIENCE-BLANC-1010",
+      label: "Faïence blanche 10x10 (m²)",
+      unit: "m2",
+      price: 24.0,
+      wastage: 0.07,
+      preview: { type: "tile", baseColor: "#f8fafc", jointColor: "#e5e7eb" },
+    },
+  ],
+  meubles: [
+    {
+      sku: "MEUBLE-VASQUE-80-BLANC",
+      label: "Meuble vasque 80 cm (pièce)",
+      unit: "piece",
+      price: 349,
+      preview: { icon: "🧼" },
+    },
+    {
+      sku: "DOUCHE-ITALIENNE-120",
+      label: "Douche à l'italienne 120x90 (pièce)",
+      unit: "piece",
+      price: 890,
+      preview: { icon: "🚿" },
+    },
+    {
+      sku: "WC-SUSPENDU",
+      label: "WC suspendu (pièce)",
+      unit: "piece",
+      price: 420,
+      preview: { icon: "🚽" },
+    },
+  ],
+  main_oeuvre: [
+    {
+      sku: "MO-POSE-CARRELAGE",
+      label: "Pose carrelage sol/mur (m²)",
+      unit: "m2",
+      price: 35,
+    },
+    {
+      sku: "MO-POSE-PARQUET",
+      label: "Pose parquet (m²)",
+      unit: "m2",
+      price: 22,
+    },
+    {
+      sku: "MO-POSE-SANITAIRE",
+      label: "Pose équipements sanitaires (forfait par pièce)",
+      unit: "piece",
+      price: 120,
+    },
+  ],
+};
+
+// --- Helpers ---------------------------------------------------------------------------------
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+const fmt = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
+
+// Calcule le périmètre (pour surface des murs) en retirant l'ouverture de porte (optionnel)
+function computeSurfaces({ length, width, height, doorWidth = 0.9, doorHeight = 2.05 }) {
+  const areaFloor = length * width; // m²
+  const perimeter = 2 * (length + width);
+  const wallArea = perimeter * height - doorWidth * doorHeight; // m², simplifié
+  return { areaFloor, wallArea };
+}
+
+function download(filename, content) {
+  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// --- PDF table rendering --------------------------------------------------------------------
+const DEFAULT_MARGIN = 40;
+
+/**
+ * Rend un tableau dans jsPDF, avec compatibilité large:
+ * - utilise autoTable(doc, options) si import dispo (v3)
+ * - sinon utilise doc.autoTable(...) si plugin patch l'instance
+ * - sinon, fallback manuel (dessin de cellules + sauts de page + wrap texte)
+ * Retourne la coordonnée Y finale.
+ */
+function renderTable(doc, { startY, headers, rows, widths, alignRightCols = [2, 4, 5], margin = DEFAULT_MARGIN }) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const tableWidth = pageWidth - margin * 2;
+  const safeWidths = Array.isArray(widths) && widths.length === headers.length
+    ? widths
+    : [0.34, 0.16, 0.08, 0.08, 0.17, 0.17].map((f) => f * tableWidth);
+
+  // 1) jsPDF-Autotable v3 style
+  if (typeof autoTable === "function") {
+    try {
+      autoTable(doc, {
+        startY,
+        head: [headers],
+        body: rows,
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [240, 240, 240] },
+        columnStyles: {
+          2: { halign: "right", cellWidth: safeWidths[2] },
+          4: { halign: "right", cellWidth: safeWidths[4] },
+          5: { halign: "right", cellWidth: safeWidths[5] },
+        },
+        theme: "grid",
+        tableWidth,
+        margin: { left: margin, right: margin },
+      });
+      // @ts-ignore
+      const finalY = (doc.lastAutoTable && doc.lastAutoTable.finalY) || (doc.autoTable && doc.autoTable.previous && doc.autoTable.previous.finalY) || startY;
+      return finalY;
+    } catch (_) { /* si import incompatible, on continue vers 2) */ }
+  }
+
+  // 2) jsPDF-Autotable instance method
+  if (typeof doc.autoTable === "function") {
+    try {
+      // @ts-ignore
+      doc.autoTable({
+        startY,
+        head: [headers],
+        body: rows,
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [240, 240, 240] },
+        columnStyles: {
+          2: { halign: "right", cellWidth: safeWidths[2] },
+          4: { halign: "right", cellWidth: safeWidths[4] },
+          5: { halign: "right", cellWidth: safeWidths[5] },
+        },
+        theme: "grid",
+        tableWidth,
+        margin: { left: margin, right: margin },
+      });
+      // @ts-ignore
+      const finalY = (doc.lastAutoTable && doc.lastAutoTable.finalY) || (doc.autoTable && doc.autoTable.previous && doc.autoTable.previous.finalY) || startY;
+      return finalY;
+    } catch (_) { /* si plugin présent mais casse, fallback manuel */ }
+  }
+
+  // 3) Fallback manuel
+  const padX = 6;
+  const lineHeight = 12;
+  let y = startY;
+
+  function drawHeader() {
+    let x = margin;
+    doc.setFillColor(240);
+    const headerHeight = lineHeight + 8;
+    headers.forEach((h, i) => {
+      doc.rect(x, y, safeWidths[i], headerHeight, "F");
+      doc.setFontSize(9);
+      doc.text(String(h), x + padX, y + headerHeight - 8);
+      x += safeWidths[i];
+    });
+    y += headerHeight;
+  }
+
+  function ensurePageSpace(minHeight) {
+    if (y + minHeight > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+      drawHeader(); // répéter l'en-tête sur nouvelle page
+    }
+  }
+
+  // dessiner entête
+  drawHeader();
+
+  // dessiner lignes
+  rows.forEach((row) => {
+    // calcul hauteur en fonction du wrapping
+    let x = margin;
+    const cellLines = row.map((cell, i) => {
+      const text = String(cell);
+      const maxWidth = safeWidths[i] - padX * 2;
+      return doc.splitTextToSize(text, Math.max(10, maxWidth));
+    });
+    const maxLines = Math.max(...cellLines.map((ls) => ls.length));
+    const rowHeight = maxLines * lineHeight + 8;
+
+    ensurePageSpace(rowHeight);
+
+    row.forEach((cell, i) => {
+      const w = safeWidths[i];
+      doc.rect(x, y, w, rowHeight);
+      const lines = cellLines[i];
+      lines.forEach((ln, idx) => {
+        const yy = y + 6 + (idx + 1) * lineHeight - 4;
+        const isRight = alignRightCols.includes(i);
+        if (isRight) {
+          doc.text(String(ln), x + w - padX, yy, { align: "right" });
+        } else {
+          doc.text(String(ln), x + padX, yy);
+        }
+      });
+      x += w;
+    });
+
+    y += rowHeight;
+  });
+
+  return y;
+}
+
+// --- Composants UI ---------------------------------------------------------------------------
+function Field({ label, children }) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-gray-700">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Select({ value, onChange, options }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="border rounded-xl p-2">
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function NumberInput({ value, onChange, min = 0.5, max = 20, step = 0.1 }) {
+  return (
+    <input
+      type="number"
+      className="border rounded-xl p-2"
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      onChange={(e) => onChange(clamp(Number(e.target.value), min, max))}
+    />
+  );
+}
+
+function Section({ title, children, right }) {
+  return (
+    <div className="bg-white rounded-2xl shadow p-4 md:p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function PreviewRoom({ floor, wall, length, width }) {
+  // Représentation 2D simple du sol avec pattern/texture
+  const cols = 12; // grille d'aperçu
+  const rows = Math.round((width / length) * cols) || 1;
+  const cells = Array.from({ length: rows * cols });
+
+  const tileStyle = () => {
+    const cfg = floor?.preview;
+    const base = cfg?.baseColor || "#e5e7eb";
+    const joint = cfg?.jointColor || "#d1d5db";
+    const type = cfg?.type || "solid";
+
+    const src = (cfg && (cfg.textureDataUrl || cfg.textureUrlRaw)) || "";
+    if (type === "texture" && src) {
+      const safeUrl = src.startsWith("data:") ? src : encodeURI(src);
+      const size = cfg.repeatSizePx || 60;
+      return {
+        backgroundImage: `url(${safeUrl})`,
+        backgroundRepeat: "repeat",
+        backgroundSize: `${size}px ${size}px`,
+        backgroundPosition: "center",
+        border: `1px solid ${joint}`,
+      } as React.CSSProperties;
+    }
+
+    const tile = {
+      backgroundColor: base,
+      border: `1px solid ${joint}`,
+    } as React.CSSProperties;
+    const plank = {
+      background: base,
+      borderLeft: `1px solid ${joint}`,
+    } as React.CSSProperties;
+    const solid = {
+      background: base,
+      border: `1px solid ${joint}`,
+    } as React.CSSProperties;
+
+    const styleBy: Record<string, React.CSSProperties> = { tile, plank, solid };
+    return styleBy[type] || solid;
+  };
+
+  const wallStyle: React.CSSProperties = { background: wall?.preview?.baseColor || "#ffffff" };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="h-20 rounded-xl" style={wallStyle} />
+      <div className="grid rounded-xl overflow-hidden" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+        {cells.map((_, i) => (
+          <div key={i} className="aspect-square" style={tileStyle()} />
+        ))}
+      </div>
+      <div className="text-xs text-gray-500">Aperçu schématique – non contractuel</div>
+    </div>
+  );
+}
+
+export default function App() {
+  // Dimensions (m)
+  const [length, setLength] = useState(3.0);
+  const [width, setWidth] = useState(2.4);
+  const [height, setHeight] = useState(2.5);
+
+  // Identité & génération PDF
+  const [companyName, setCompanyName] = useState("Cosmos Rénovation");
+  const [companyDetails, setCompanyDetails] = useState(`12 rue de l'Atelier, 75000 Paris\nSIREN 123 456 789\ncontact@cosmos.fr – +33 1 23 45 67 89`);
+  const [logoDataUrl, setLogoDataUrl] = useState("");
+  const [conditions, setConditions] = useState("Devis valable 30 jours. Délai indicatif selon disponibilité des matériaux. Paiement: 40% à la commande, 40% en cours, 20% à la réception. Garantie décennale selon périmètre.");
+
+  // Choix produits
+  const [floorSku, setFloorSku] = useState(CATALOG.sols[0].sku);
+  const [wallSku, setWallSku] = useState(CATALOG.murs[0].sku);
+  const [furnitureSkus, setFurnitureSkus] = useState<string[]>([]);
+
+  const floor = useMemo(() => CATALOG.sols.find((p) => p.sku === floorSku), [floorSku]);
+  const wall = useMemo(() => CATALOG.murs.find((p) => p.sku === wallSku), [wallSku]);
+
+  const { areaFloor, wallArea } = useMemo(
+    () => computeSurfaces({ length, width, height }),
+    [length, width, height]
+  );
+
+  // Lignes de devis (matériaux)
+  const materialLines = useMemo(() => {
+    const lines: { sku: string; label: string; unit: string; qty: number; unitPrice: number }[] = [];
+
+    // Sol
+    if (floor) {
+      const qty = areaFloor * (1 + (floor.wastage || 0));
+      lines.push({ sku: floor.sku, label: floor.label, unit: floor.unit, qty: +qty.toFixed(2), unitPrice: floor.price });
+    }
+
+    // Murs
+    if (wall) {
+      const qty = wallArea * (1 + (wall.wastage || 0));
+      lines.push({ sku: wall.sku, label: wall.label, unit: wall.unit, qty: +qty.toFixed(2), unitPrice: wall.price });
+    }
+
+    // Meubles
+    furnitureSkus.forEach((sku) => {
+      const p = CATALOG.meubles.find((x) => x.sku === sku);
+      if (p) lines.push({ sku: p.sku, label: p.label, unit: p.unit, qty: 1, unitPrice: p.price });
+    });
+
+    return lines;
+  }, [areaFloor, wallArea, floor, wall, furnitureSkus]);
+
+  // Lignes de devis (main d'œuvre – règles simples d'exemple)
+  const laborLines = useMemo(() => {
+    const lines: { sku: string; label: string; unit: string; qty: number; unitPrice: number }[] = [];
+    if (floor) {
+      const mo = CATALOG.main_oeuvre.find((x) => x.sku === "MO-POSE-CARRELAGE");
+      const parquet = CATALOG.main_oeuvre.find((x) => x.sku === "MO-POSE-PARQUET");
+      const isParquet = floor.sku.includes("PARQUET");
+      const ref = isParquet ? parquet : mo;
+      const qty = areaFloor;
+      if (ref) lines.push({ sku: ref.sku, label: ref.label, unit: ref.unit, qty: +qty.toFixed(2), unitPrice: ref.price });
+    }
+    if (wall) {
+      const mo = CATALOG.main_oeuvre.find((x) => x.sku === "MO-POSE-CARRELAGE");
+      if (wall.sku.includes("FAIENCE") && mo) {
+        lines.push({ sku: mo.sku, label: mo.label + " (murs)", unit: mo.unit, qty: +wallArea.toFixed(2), unitPrice: mo.price });
+      }
+    }
+    furnitureSkus.forEach((sku) => {
+      const mo = CATALOG.main_oeuvre.find((x) => x.sku === "MO-POSE-SANITAIRE");
+      if (mo) lines.push({ sku: mo.sku, label: mo.label, unit: mo.unit, qty: 1, unitPrice: mo.price });
+    });
+    return lines;
+  }, [floor, wall, areaFloor, wallArea, furnitureSkus]);
+
+  const allLines = [...materialLines, ...laborLines];
+  const totalHT = allLines.reduce((s, l) => s + l.qty * l.unitPrice, 0);
+  const tvaRate = 0.2; // exemple 20%
+  const totalTVA = totalHT * tvaRate;
+  const totalTTC = totalHT + totalTVA;
+
+  function toggleFurniture(sku: string) {
+    setFurnitureSkus((prev) => (prev.includes(sku) ? prev.filter((x) => x !== sku) : [...prev, sku]));
+  }
+
+  function exportDevis() {
+    const devis = {
+      meta: {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        clientNote: "Devis indicatif basé sur les sélections du configurateur. Sous réserve de métrés et visite technique.",
+      },
+      entreprise: { name: companyName, details: companyDetails },
+      piece: { length, width, height, surfaces: { sol_m2: +areaFloor.toFixed(2), murs_m2: +wallArea.toFixed(2) } },
+      lignes: allLines.map((l) => ({ ...l, total: +(l.qty * l.unitPrice).toFixed(2) })),
+      totaux: { totalHT: +totalHT.toFixed(2), tvaRate, totalTVA: +totalTVA.toFixed(2), totalTTC: +totalTTC.toFixed(2) },
+      conditions,
+    };
+    download(`devis-configurateur-${Date.now()}.json`, JSON.stringify(devis, null, 2));
+  }
+
+  function exportPDF() {
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const margin = DEFAULT_MARGIN;
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Header
+    if (logoDataUrl) {
+      try { doc.addImage(logoDataUrl, "PNG", margin, margin, 120, 60); } catch (e) { /* ignore */ }
+    }
+    doc.setFontSize(20);
+    doc.text("DEVIS", pageWidth - margin, margin + 20, { align: "right" });
+    doc.setFontSize(10);
+    const lines = doc.splitTextToSize(companyDetails, 220);
+    doc.text(companyName, pageWidth - margin, margin + 40, { align: "right" });
+    doc.text(lines, pageWidth - margin, margin + 56, { align: "right" });
+
+    // Infos pièce
+    doc.setFontSize(12);
+    doc.text(`Pièce: L ${length} m × l ${width} m × h ${height} m`, margin, 140);
+    doc.text(`Surfaces: sol ${areaFloor.toFixed(2)} m² – murs ${wallArea.toFixed(2)} m²`, margin, 160);
+
+    // Tableau lignes
+    const rows = allLines.map((l) => [
+      l.label,
+      l.sku,
+      String(l.qty),
+      l.unit,
+      (l.unitPrice).toFixed(2) + " €",
+      (l.qty * l.unitPrice).toFixed(2) + " €",
+    ]);
+
+    const finalY = renderTable(doc, {
+      startY: 180,
+      headers: ["Désignation", "SKU", "Qté", "Unité", "PU HT", "Total HT"],
+      rows,
+      widths: undefined, // utilise la répartition par défaut
+      alignRightCols: [2, 4, 5],
+      margin,
+    });
+
+    let y = finalY + 20;
+    // Totaux
+    doc.setFontSize(12);
+    doc.text(`Sous-total HT: ${totalHT.toFixed(2)} €`, pageWidth - margin, y, { align: "right" }); y += 18;
+    doc.text(`TVA (20%): ${totalTVA.toFixed(2)} €`, pageWidth - margin, y, { align: "right" }); y += 18;
+    doc.setFontSize(14);
+    doc.text(`Total TTC: ${totalTTC.toFixed(2)} €`, pageWidth - margin, y, { align: "right" }); y += 28;
+
+    // Conditions
+    doc.setFontSize(10);
+    doc.text("Conditions", margin, y);
+    const condLines = doc.splitTextToSize(conditions, pageWidth - margin * 2);
+    doc.text(condLines, margin, y + 16);
+
+    // Footer
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(9);
+    doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} via Configurateur Cosmos`, pageWidth / 2, pageHeight - 20, { align: "center" });
+
+    doc.save(`devis-${Date.now()}.pdf`);
+  }
+
+  // --- Tests (auto) -------------------------------------------------------------------------
+  const approxEq = (a: number, b: number, eps = 0.02) => Math.abs(a - b) <= eps;
+  const selfTests = useMemo(() => {
+    const out: { name: string; passed: boolean; expected: unknown; got: unknown }[] = [];
+
+    // Test 1: computeSurfaces avec dimensions fixes
+    const s = computeSurfaces({ length: 3.0, width: 2.4, height: 2.5 });
+    out.push({
+      name: "Surface sol 3.0×2.4",
+      passed: approxEq(s.areaFloor, 7.2, 0.001),
+      expected: 7.2,
+      got: +s.areaFloor.toFixed(3),
+    });
+    out.push({
+      name: "Surface murs (hors porte)",
+      passed: approxEq(s.wallArea, 25.155, 0.02),
+      expected: 25.155,
+      got: +s.wallArea.toFixed(3),
+    });
+
+    // Test 2: quantités matériaux avec pertes, arrondies à 2 décimales
+    const floorP = CATALOG.sols[0];
+    const wallP = CATALOG.murs[0];
+    const floorQty = +((7.2) * (1 + (floorP.wastage || 0))).toFixed(2);
+    const wallQty = +((25.155) * (1 + (wallP.wastage || 0))).toFixed(2);
+    out.push({ name: "Sol qty avec pertes (m²)", passed: floorQty === 7.78, expected: 7.78, got: floorQty });
+    out.push({ name: "Murs qty avec pertes (m²)", passed: wallQty === 26.41, expected: 26.41, got: wallQty });
+
+    // Test 3: fonctions export
+    out.push({ name: "exportDevis défini", passed: typeof exportDevis === "function", expected: "function", got: typeof exportDevis });
+    out.push({ name: "exportPDF défini", passed: typeof exportPDF === "function", expected: "function", got: typeof exportPDF });
+
+    // Test 4: présence librairie PDF
+    out.push({ name: "jsPDF dispo", passed: typeof jsPDF === "function", expected: "function", got: typeof jsPDF });
+
+    // Test 5: table renderer dispo et renvoie une Y valide
+    try {
+      const td = new jsPDF({ unit: "pt", format: "a4" });
+      const y = renderTable(td, {
+        startY: 100,
+        headers: ["A", "B"],
+        rows: [["x", "1"], ["yyy", "2"]],
+        widths: [200, 100],
+        alignRightCols: [1],
+        margin: 40,
+      });
+      out.push({ name: "renderTable finalY numérique", passed: typeof y === "number" && y >= 100, expected: ">= 100", got: String(y) });
+    } catch (e: any) {
+      out.push({ name: "renderTable exécutable", passed: false, expected: "no error", got: e?.message || String(e) });
+    }
+
+    // Test 6: texture Limestone présente
+    out.push({
+      name: "Texture Limestone définie",
+      passed: !!CATALOG.sols.find((p) => p.sku === "SOL-GRES-LIMESTONE-6060-SAND")?.preview?.textureDataUrl,
+      expected: true,
+      got: !!CATALOG.sols.find((p) => p.sku === "SOL-GRES-LIMESTONE-6060-SAND")?.preview?.textureDataUrl,
+    });
+
+    // Test 7: base64 data URL valide
+    out.push({
+      name: "Texture base64 valide",
+      passed: /^data:image\//.test(String(CATALOG.sols.find((p)=>p.sku==="SOL-GRES-LIMESTONE-6060-SAND")?.preview?.textureDataUrl || "")),
+      expected: true,
+      got: String(CATALOG.sols.find((p)=>p.sku==="SOL-GRES-LIMESTONE-6060-SAND")?.preview?.textureDataUrl || "").slice(0,15)+"…",
+    });
+
+    return out;
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          <Section title="Aperçu de la pièce">
+            <PreviewRoom floor={floor} wall={wall} length={length} width={width} />
+          </Section>
+
+          <Section title="Sélection des matériaux & équipements">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Sol">
+                <Select
+                  value={floorSku}
+                  onChange={setFloorSku}
+                  options={CATALOG.sols.map((p) => ({ value: p.sku, label: `${p.label} – ${fmt(p.price)}/${p.unit}` }))}
+                />
+              </Field>
+              <Field label="Murs">
+                <Select
+                  value={wallSku}
+                  onChange={setWallSku}
+                  options={CATALOG.murs.map((p) => ({ value: p.sku, label: `${p.label} – ${fmt(p.price)}/${p.unit}` }))}
+                />
+              </Field>
+              <Field label="Meubles & sanitaires">
+                <div className="flex flex-col gap-2">
+                  {CATALOG.meubles.map((p) => (
+                    <label key={p.sku} className="flex items-center gap-2">
+                      <input type="checkbox" checked={furnitureSkus.includes(p.sku)} onChange={() => toggleFurniture(p.sku)} />
+                      <span>
+                        {p.preview?.icon} {p.label} – {fmt(p.price)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            </div>
+          </Section>
+        </div>
+
+        <div className="lg:col-span-1 flex flex-col gap-6">
+          <Section
+            title="Dimensions"
+            right={<span className="text-sm text-gray-500">en mètres</span>}
+          >
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Longueur">
+                <NumberInput value={length} onChange={setLength} />
+              </Field>
+              <Field label="Largeur">
+                <NumberInput value={width} onChange={setWidth} />
+              </Field>
+              <Field label="Hauteur">
+                <NumberInput value={height} onChange={setHeight} />
+              </Field>
+            </div>
+            <div className="mt-3 text-sm text-gray-600">
+              <div>Surface sol: <strong>{areaFloor.toFixed(2)} m²</strong></div>
+              <div>Surface murs (net): <strong>{wallArea.toFixed(2)} m²</strong></div>
+            </div>
+          </Section>
+
+          <Section title="Devis transparent">
+            <div className="max-h-60 overflow-auto divide-y">
+              {allLines.map((l, idx) => (
+                <div key={idx} className="flex items-center justify-between py-2 text-sm">
+                  <div className="flex-1 pr-2">
+                    <div className="font-medium">{l.label}</div>
+                    <div className="text-gray-500">{l.sku} • {l.qty} {l.unit}</div>
+                  </div>
+                  <div className="text-right">
+                    <div>{fmt(l.unitPrice)} / {l.unit}</div>
+                    <div className="font-semibold">{fmt(l.qty * l.unitPrice)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 border-t pt-3 text-sm">
+              <div className="flex justify-between"><span>Sous-total (HT)</span><strong>{fmt(totalHT)}</strong></div>
+              <div className="flex justify-between"><span>TVA (20%)</span><strong>{fmt(totalTVA)}</strong></div>
+              <div className="flex justify-between text-lg mt-1"><span>Total TTC</span><strong>{fmt(totalTTC)}</strong></div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+              <button onClick={exportDevis} className="rounded-2xl px-4 py-2 bg-gray-800 text-white hover:opacity-90">
+                Exporter le devis (JSON)
+              </button>
+              <button onClick={exportPDF} className="rounded-2xl px-4 py-2 bg-black text-white hover:opacity-90">
+                Télécharger le devis (PDF)
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">Le PDF se génère côté navigateur et peut être envoyé à votre ERP/CRM.</p>
+          </Section>
+
+          <Section title="Identité & PDF">
+            <div className="grid grid-cols-1 gap-3 text-sm">
+              <label className="flex flex-col gap-1">
+                <span className="text-gray-700">Nom de l'entreprise</span>
+                <input className="border rounded-xl p-2" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-gray-700">Coordonnées (adresse, SIREN, contact)</span>
+                <textarea className="border rounded-xl p-2" rows={3} value={companyDetails} onChange={(e) => setCompanyDetails(e.target.value)} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-gray-700">Logo (PNG/JPG)</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const dataUrl = await fileToDataUrl(file);
+                      setLogoDataUrl(String(dataUrl));
+                    }
+                  }}
+                />
+                <span className="text-xs text-gray-500">Optionnel — s'affichera en haut du PDF.</span>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-gray-700">Conditions</span>
+                <textarea className="border rounded-xl p-2" rows={4} value={conditions} onChange={(e) => setConditions(e.target.value)} />
+              </label>
+            </div>
+          </Section>
+
+          <Section title="Tests (automatiques)">
+            <ul className="text-sm space-y-2">
+              {selfTests.map((t, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-white text-xs ${t.passed ? 'bg-green-600' : 'bg-red-600'}`}>{t.passed ? '✓' : '✗'}</span>
+                  <div>
+                    <div className="font-medium">{t.name}</div>
+                    <div className="text-gray-500">Attendu: {String(t.expected)} • Obtenu: {String(t.got)}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Section>
+
+          <Section title="Prochaines étapes (technique)">
+            <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
+              <li>Brancher le catalogue à votre base interne (SKU, prix, stocks, unités, visuels, variantes).</li>
+              <li>Créer une API <code>/api/devis</code> qui reçoit les lignes et renvoie un PDF signé + ID devis.</li>
+              <li>Authentification <em>back-office</em> pour gérer le catalogue et les règles de main d'œuvre.</li>
+              <li>Améliorer l'aperçu: Three.js/Babylon.js pour 3D, import de plans, AR (WebXR) en option.</li>
+              <li>Tracking analytique des choix pour optimiser l'offre et les bundles.</li>
+            </ul>
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
